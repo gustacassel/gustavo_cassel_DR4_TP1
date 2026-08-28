@@ -4,6 +4,9 @@ import br.edu.infnet.ecommerce.entity.*;
 import br.edu.infnet.ecommerce.exception.EstoqueInsuficienteException;
 import br.edu.infnet.ecommerce.exception.PagamentoRecusadoException;
 import br.edu.infnet.ecommerce.exception.RecursoNaoEncontradoException;
+import br.edu.infnet.ecommerce.pagamento.application.IniciarPagamentoCommand;
+import br.edu.infnet.ecommerce.pagamento.application.PagamentoApplicationService;
+import br.edu.infnet.ecommerce.pagamento.application.PagamentoResultado;
 import br.edu.infnet.ecommerce.repository.*;
 import br.edu.infnet.ecommerce.request.CriarPedidoRequest;
 import br.edu.infnet.ecommerce.request.ItemPedidoRequest;
@@ -16,34 +19,24 @@ import java.util.List;
 @Service
 public class PedidoService {
 
-    /*
-     * Classe central da atividade.
-     *
-     * Ela acessa diretamente repositórios de Usuário, Produto, Estoque,
-     * Pedido e Pagamento, além de chamar PagamentoService.
-     * Essa mistura é proposital.
-     */
     private final UsuarioRepository usuarioRepository;
     private final ProdutoRepository produtoRepository;
     private final EstoqueRepository estoqueRepository;
     private final PedidoRepository pedidoRepository;
-    private final PagamentoRepository pagamentoRepository;
-    private final PagamentoService pagamentoService;
+    private final PagamentoApplicationService pagamentoApplicationService;
 
     public PedidoService(
             UsuarioRepository usuarioRepository,
             ProdutoRepository produtoRepository,
             EstoqueRepository estoqueRepository,
             PedidoRepository pedidoRepository,
-            PagamentoRepository pagamentoRepository,
-            PagamentoService pagamentoService
+            PagamentoApplicationService pagamentoApplicationService
     ) {
         this.usuarioRepository = usuarioRepository;
         this.produtoRepository = produtoRepository;
         this.estoqueRepository = estoqueRepository;
         this.pedidoRepository = pedidoRepository;
-        this.pagamentoRepository = pagamentoRepository;
-        this.pagamentoService = pagamentoService;
+        this.pagamentoApplicationService = pagamentoApplicationService;
     }
 
     public List<Pedido> listar() {
@@ -57,10 +50,6 @@ public class PedidoService {
                 ));
     }
 
-    /*
-     * Uma única transação envolve usuário, produto, estoque,
-     * pedido e pagamento.
-     */
     @Transactional
     public Pedido criar(CriarPedidoRequest request) {
         Usuario usuario = usuarioRepository.findById(request.usuarioId())
@@ -118,27 +107,22 @@ public class PedidoService {
         pedido.setStatus("AGUARDANDO_PAGAMENTO");
         Pedido pedidoSalvo = pedidoRepository.save(pedido);
 
-        Pagamento pagamento = pagamentoService.processar(
-                pedidoSalvo,
-                usuario,
-                total,
-                request.formaPagamento(),
-                request.numeroCartao()
+        PagamentoResultado resultado = pagamentoApplicationService.processar(
+                new IniciarPagamentoCommand(
+                        pedidoSalvo.getId(),
+                        usuario.getId(),
+                        total,
+                        request.formaPagamento(),
+                        request.numeroCartao()
+                )
         );
 
-        // Dependência direta do resultado persistido por outro service.
-        Pagamento pagamentoConsultado = pagamentoRepository
-                .findByPedidoId(pedidoSalvo.getId())
-                .orElseThrow(() -> new IllegalStateException(
-                        "Pagamento não foi persistido"
-                ));
-
-        if (!"APROVADO".equals(pagamentoConsultado.getStatus())) {
+        if (!resultado.aprovado()) {
             pedidoSalvo.setStatus("PAGAMENTO_RECUSADO");
             pedidoRepository.save(pedidoSalvo);
 
             throw new PagamentoRecusadoException(
-                    "Pagamento recusado: " + pagamento.getMotivo()
+                    "Pagamento recusado: " + resultado.motivoRecusa()
             );
         }
 

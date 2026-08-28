@@ -71,7 +71,7 @@ curl -X POST http://localhost:8080/pedidos   -H "Content-Type: application/json"
 
 ## Aviso pedagógico
 
-A arquitetura foi intencionalmente construída com problemas:
+A arquitetura original foi intencionalmente construída com problemas, como base para a atividade de refatoração (TP1):
 
 - organização horizontal por camada técnica;
 - entidades JPA usadas diretamente nos controllers;
@@ -84,4 +84,23 @@ A arquitetura foi intencionalmente construída com problemas:
 - uma única transação envolvendo pedido, estoque e pagamento;
 - ausência de Aggregate Root, Value Objects, portas e adaptadores.
 
-Esses problemas fazem parte da atividade e não devem ser corrigidos antes da entrega aos alunos.
+Os contextos de Usuário, Produto e Estoque permanecem como no projeto base (fora do escopo do TP1). O contexto de Pagamento foi extraído conforme descrito abaixo.
+
+## Refatoração aplicada (TP1)
+
+O contexto de Pagamento foi extraído para `br.edu.infnet.ecommerce.pagamento`, seguindo DDD tático (Aggregate Root, Value Objects, portas e adapters), usando Branch by Abstraction + Strangler Fig como estratégia de migração — o `PedidoService` deixou de acessar `Pagamento`/`PagamentoRepository` diretamente e passou a depender só do serviço de aplicação do novo contexto.
+
+```
+br.edu.infnet.ecommerce.pagamento
+├── domain             // Pagamento (Aggregate Root), Dinheiro/NumeroCartao (VOs),
+│                       // StatusPagamento/FormaPagamento, PagamentoRepository (porta)
+├── application        // PagamentoApplicationService, PedidoIntegracao e
+│                       // ProcessadorCartaoPort (portas)
+└── infrastructure      // PagamentoJpaEntity (sem relacionamento JPA com outros
+                         // contextos), adapters de persistência, integração
+                         // com Pedido e processador de cartão
+```
+
+O contexto de Pagamento nunca acessa `UsuarioRepository`, `ProdutoRepository`, `EstoqueRepository` ou `PedidoRepository` diretamente — recebe apenas `pedidoId`/`usuarioId`. O único ponto de contato com o monólito legado é o adapter `PedidoIntegracaoAdapter`; numa extração futura para um serviço separado, só ele mudaria.
+
+As regras de pagamento simuladas (seção acima) continuam as mesmas, agora encapsuladas no Aggregate Root `Pagamento`.
